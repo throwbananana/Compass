@@ -1,0 +1,92 @@
+{
+    "en": {
+        "window_title": "Universal Code Packager (Python, C#, Node, Java)",
+        "lang_switch_btn": "Language: English",
+        "group_general": "General Settings",
+        "label_target_lang": "Target Language:",
+        "group_config": "Configuration",
+        
+        "btn_browse_file": "Browse File...",
+        "btn_browse_folder": "Browse Folder...",
+        "btn_build": "Start Build",
+        "log_placeholder": "Build logs will appear here...",
+        "msg_success": "Build Completed Successfully!",
+        "msg_fail": "Build Failed! Check logs.",
+        
+        "py_input_label": "Script/Folder:",
+        "py_input_ph": "Select .py file or folder",
+        "py_entry_label": "Entry Point:",
+        "py_backend_label": "Engine (Protection):",
+        "py_onefile": "One File (--onefile)",
+        "py_noconsole": "No Console (GUI Mode)",
+        "py_clean": "Clean Build",
+        "py_interpreter_label": "Python Interpreter:", 
+        "py_interpreter_ph": "Auto-detect or select python.exe",
+        
+        "cs_input_label": "Project File (.csproj):",
+        "cs_input_ph": "Select .csproj file",
+        "cs_self_contained": "Self Contained (No .NET required)",
+        "cs_single_file": "Produce Single File",
+        "cs_trim": "Trim Unused Code (Smaller Size)",
+        "cs_rid_label": "Target Runtime (RID):",
+        
+        "node_input_label": "Entry File / package.json:",
+        "node_input_ph": "Select .js or package.json",
+        "node_target_label": "Target Node Version:",
+        
+        "java_input_label": "Main JAR / Folder:",
+        "java_input_ph": "Select .jar file",
+        "java_main_class": "Main Class (optional for executable jar):",
+        "java_type_label": "Output Type:",
+        
+        "err_title": "Error",
+        "err_no_input": "Please select an input file/project.",
+        "err_tool_missing": "Build tool '{}' not found in PATH.\nPlease install it first.",
+        "err_store_python": "Nuitka does not support Windows Store Python.\nPlease install the official Python from python.org."
+    },
+    "zh": {
+        "window_title": "通用代码打包工具 (Python, C#, Node, Java)",
+        "lang_switch_btn": "语言: 中文",
+        "group_general": "通用设置",
+        "label_target_lang": "目标语言:",
+        "group_config": "详细配置",
+        
+        "btn_browse_file": "浏览文件...",
+        "btn_browse_folder": "浏览文件夹...",
+        "btn_build": "开始构建",
+        "log_placeholder": "构建日志将显示在这里...",
+        "msg_success": "构建成功完成！",
+        "msg_fail": "构建失败！请检查日志。",
+        
+        "py_input_label": "脚本/文件夹:",
+        "py_input_ph": "选择 .py 文件或文件夹",
+        "py_entry_label": "入口文件:",
+        "py_backend_label": "打包引擎 (保护强度):",
+        "py_onefile": "单文件 (--onefile)",
+        "py_noconsole": "无控制台 (GUI模式)",
+        "py_clean": "清理构建",
+        "py_interpreter_label": "Python 解释器:",
+        "py_interpreter_ph": "自动检测或选择 python.exe",
+        
+        "cs_input_label": "项目文件 (.csproj):",
+        "cs_input_ph": "选择 .csproj 文件",
+        "cs_self_contained": "独立部署 (无需安装 .NET)",
+        "cs_single_file": "生成单文件",
+        "cs_trim": "裁剪未使用代码 (更小体积)",
+        "cs_rid_label": "目标运行环境 (RID):",
+        
+        "node_input_label": "入口文件 / package.json:",
+        "node_input_ph": "选择 .js 或 package.json",
+        "node_target_label": "目标 Node 版本:",
+        
+        "java_input_label": "主 JAR / 文件夹:",
+        "java_input_ph": "选择 .jar 文件",
+        "java_main_class": "主类 (可执行JAR可选):",
+        "java_type_label": "输出类型:",
+        
+        "err_title": "错误",
+        "err_no_input": "请先选择输入文件或项目。",
+        "err_tool_missing": "未在环境变量中找到构建工具 '{}'。\n请确保已安装该语言的开发环境。",
+        "err_store_python": "Nuitka 不支持微软商店版 Python (WindowsApps)。\n请去 python.org 下载安装官方版本。"
+    }
+}
