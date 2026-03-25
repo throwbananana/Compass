@@ -111,6 +111,34 @@ class TestBuilders(unittest.TestCase):
             self.assertTrue((output_dir / "local.properties").exists())
             self.assertIn("Gradle Task: assembleDebug", result["log_text"])
 
+    @patch("core.android_project.shutil.which", return_value=None)
+    @patch("core.android_project.Path.home")
+    def test_build_android_detects_gradle_from_wrapper_cache(self, mock_home, mock_which):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_dir = temp_path / "webapp"
+            output_dir = temp_path / "android-project"
+            sdk_dir = temp_path / "AndroidSdk"
+            cached_gradle = temp_path / ".gradle" / "wrapper" / "dists" / "gradle-8.14-all" / "hash" / "gradle-8.14" / "bin"
+
+            source_dir.mkdir()
+            sdk_dir.mkdir()
+            cached_gradle.mkdir(parents=True)
+            (source_dir / "index.html").write_text("<html><body>Hello</body></html>", encoding="utf-8")
+            (cached_gradle / ("gradle.bat" if os.name == "nt" else "gradle")).write_text("stub", encoding="utf-8")
+            mock_home.return_value = temp_path
+
+            config = AndroidConfig(
+                source_dir=str(source_dir),
+                output_dir=str(output_dir),
+                build_mode="apk_debug",
+                android_sdk_path=str(sdk_dir),
+            )
+            result = Builder.build_android(config)
+
+            self.assertIn("assembleDebug", result["cmd"])
+            self.assertIn(".gradle", result["cmd"][0])
+
     def test_build_android_rejects_output_inside_source(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             source_dir = Path(temp_dir) / "webapp"

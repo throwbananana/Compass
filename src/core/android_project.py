@@ -180,6 +180,12 @@ def resolve_gradle_command(custom_gradle_path: str) -> str:
             if path:
                 candidates.append(Path(path))
 
+        gradle_cache_dir = Path.home() / ".gradle" / "wrapper" / "dists"
+        if gradle_cache_dir.exists():
+            for pattern in ("**/bin/gradle.bat", "**/bin/gradle"):
+                cached = sorted(gradle_cache_dir.glob(pattern), reverse=True)
+                candidates.extend(cached)
+
     for candidate in candidates:
         if candidate.exists():
             return str(candidate)
