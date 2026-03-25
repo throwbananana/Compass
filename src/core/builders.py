@@ -2,6 +2,8 @@ import sys
 import os
 import shutil
 
+from .android_project import build_android_project
+
 class Builder:
     """
     Core logic for building applications.
@@ -179,3 +181,11 @@ class Builder:
         cmd.append(f"--dest={os.path.join(project_dir, 'dist')}")
         
         return cmd, project_dir
+
+    @staticmethod
+    def build_android(config: 'AndroidConfig'):
+        """
+        Generate an Android Studio project from a local web folder and optionally
+        prepare a Gradle build command for APK/AAB output.
+        """
+        return build_android_project(config)

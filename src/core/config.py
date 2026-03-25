@@ -29,3 +29,18 @@ class JavaConfig:
     main_jar: str
     main_class: Optional[str] = None
     output_type: str = 'exe'
+
+
+@dataclass
+class AndroidConfig:
+    source_dir: str
+    output_dir: str = ''
+    start_page: str = ''
+    app_name: str = ''
+    package_name: str = ''
+    min_sdk: int = 24
+    target_sdk: int = 35
+    mobile_adapt: bool = True
+    build_mode: str = 'project'  # 'project', 'apk_debug', 'apk_release', 'aab_release'
+    gradle_path: str = ''
+    android_sdk_path: str = ''
