@@ -527,7 +527,7 @@ class MultiPackagerApp(QMainWindow):
             return
 
         html_files = []
-        ignored_dirs = {".git", ".gradle", ".idea", "__pycache__", "node_modules", "build", "dist"}
+        ignored_dirs = {".git", ".gradle", ".idea", "__pycache__", "node_modules"}
         for root, dirs, files in os.walk(path):
             dirs[:] = [directory for directory in dirs if directory not in ignored_dirs]
             for file_name in files:
@@ -638,6 +638,7 @@ class MultiPackagerApp(QMainWindow):
                     min_sdk=self.android_min_sdk.value(),
                     target_sdk=self.android_target_sdk.value(),
                     mobile_adapt=self.android_mobile_adapt.isChecked(),
+                    prefer_built_web_root=True,
                     build_mode=self.android_build_mode.currentData() or "project",
                     gradle_path=self.android_gradle.text().strip(),
                     android_sdk_path=self.android_sdk.text().strip(),

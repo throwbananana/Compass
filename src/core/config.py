@@ -40,7 +40,10 @@ class AndroidConfig:
     package_name: str = ''
     min_sdk: int = 24
     target_sdk: int = 35
+    version_code: int = 1
+    version_name: str = '1.0.0'
     mobile_adapt: bool = True
+    prefer_built_web_root: bool = True
     build_mode: str = 'project'  # 'project', 'apk_debug', 'apk_release', 'aab_release'
     gradle_path: str = ''
     android_sdk_path: str = ''

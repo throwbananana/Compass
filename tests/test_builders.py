@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 import os
 import sys
 import tempfile
@@ -12,7 +12,7 @@ from core.config import AndroidConfig, PythonConfig, CSharpConfig, NodeConfig, J
 from core.builders import Builder
 
 class TestBuilders(unittest.TestCase):
-    
+
     @patch('os.path.exists', return_value=True)
     @patch('shutil.which', return_value='/usr/bin/python')
     def test_build_python_pyinstaller(self, mock_which, mock_exists):
@@ -20,7 +20,7 @@ class TestBuilders(unittest.TestCase):
         cmd, _ = Builder.build_python(config)
         self.assertIn("PyInstaller", cmd[2])
         self.assertIn("--onefile", cmd)
-        
+
     @patch('os.path.exists', return_value=True)
     @patch('shutil.which', return_value='/usr/bin/dotnet')
     def test_build_csharp(self, mock_which, mock_exists):
@@ -75,6 +75,7 @@ class TestBuilders(unittest.TestCase):
             self.assertTrue((output_dir / "app" / "src" / "main" / "java" / "com" / "demo" / "app" / "MainActivity.java").exists())
             self.assertIn("Android project generated successfully.", result["log_text"])
             self.assertIn("Start Page: index.html", result["log_text"])
+            self.assertIn("Android Gradle Plugin: 8.13.0", result["log_text"])
 
             root_html = (output_dir / "app" / "src" / "main" / "assets" / "app" / "index.html").read_text(encoding="utf-8")
             nested_html = (output_dir / "app" / "src" / "main" / "assets" / "app" / "pages" / "about.html").read_text(encoding="utf-8")
@@ -86,11 +87,41 @@ class TestBuilders(unittest.TestCase):
             settings_gradle = (output_dir / "settings.gradle").read_text(encoding="utf-8")
             colors_xml = (output_dir / "app" / "src" / "main" / "res" / "values" / "colors.xml").read_text(encoding="utf-8")
             app_build_gradle = (output_dir / "app" / "build.gradle").read_text(encoding="utf-8")
-            self.assertIn("https://maven.aliyun.com/repository/google", settings_gradle)
-            self.assertIn("https://maven.aliyun.com/repository/public", settings_gradle)
+            readme = (output_dir / "README.md").read_text(encoding="utf-8")
+            self.assertIn("COMPASS_USE_ALIYUN_MIRRORS", settings_gradle)
+            self.assertIn("google()", settings_gradle)
             self.assertTrue(colors_xml.startswith("<?xml"))
-            self.assertIn("kotlin-bom:1.8.22", app_build_gradle)
-            self.assertIn("kotlin-stdlib-jdk8", app_build_gradle)
+            self.assertIn("com.android.application' version '8.13.0", (output_dir / "build.gradle").read_text(encoding="utf-8"))
+            self.assertIn("androidx.webkit:webkit:1.15.0", app_build_gradle)
+            self.assertIn("COMPASS_ANDROID_KEYSTORE_FILE", app_build_gradle)
+            self.assertIn("keystore.properties.example", readme)
+            self.assertTrue((output_dir / "keystore.properties.example").exists())
+            self.assertTrue((output_dir / "app" / "src" / "main" / "res" / "xml" / "network_security_config.xml").exists())
+
+    def test_build_android_prefers_dist_output_for_frontend_roots(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_dir = Path(temp_dir) / "frontend"
+            output_dir = Path(temp_dir) / "android-project"
+            (source_dir / "src").mkdir(parents=True)
+            (source_dir / "dist" / "assets").mkdir(parents=True)
+            (source_dir / "package.json").write_text('{"name":"demo"}', encoding="utf-8")
+            (source_dir / "src" / "index.html").write_text('<html><body>wrong root</body></html>', encoding="utf-8")
+            (source_dir / "dist" / "index.html").write_text('<html><body>correct dist</body></html>', encoding="utf-8")
+            (source_dir / "dist" / "assets" / "app.js").write_text('console.log("ok")', encoding="utf-8")
+
+            config = AndroidConfig(
+                source_dir=str(source_dir),
+                output_dir=str(output_dir),
+                app_name="Demo App",
+                package_name="com.demo.app",
+            )
+            result = Builder.build_android(config)
+
+            self.assertIn(f"Web Root: {source_dir / 'dist'}", result["log_text"])
+            copied_index = (output_dir / "app" / "src" / "main" / "assets" / "app" / "index.html").read_text(encoding="utf-8")
+            self.assertIn("correct dist", copied_index)
+            self.assertTrue((output_dir / "app" / "src" / "main" / "assets" / "app" / "assets" / "app.js").exists())
+            self.assertFalse((output_dir / "app" / "src" / "main" / "assets" / "app" / "dist").exists())
 
     def test_build_android_prepares_gradle_apk_command(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -119,6 +150,7 @@ class TestBuilders(unittest.TestCase):
             self.assertTrue(result["artifact_dir"].endswith(os.path.join("app", "build", "outputs", "apk", "debug")))
             self.assertTrue((output_dir / "local.properties").exists())
             self.assertIn("Gradle Task: assembleDebug", result["log_text"])
+            self.assertIn("JDK 17+", result["log_text"])
 
     @patch("core.android_project.shutil.which", return_value=None)
     @patch("core.android_project.Path.home")

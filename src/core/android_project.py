@@ -8,6 +8,19 @@ from pathlib import Path
 
 
 PRIORITY_START_FILES = ("index.html", "main.html", "home.html", "default.html")
+PREFERRED_WEB_ROOT_NAMES = ("dist", "build", "public", "www", "site", "output", "release", "docs")
+PROJECT_MARKER_FILES = (
+    "package.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "package-lock.json",
+    "vite.config.js",
+    "vite.config.ts",
+    "webpack.config.js",
+    "webpack.config.cjs",
+    "rollup.config.js",
+    "astro.config.mjs",
+)
 IGNORED_NAMES = {
     ".git",
     ".gradle",
@@ -16,8 +29,6 @@ IGNORED_NAMES = {
     "android",
     "android_project",
     "android-project",
-    "build",
-    "dist",
     "node_modules",
 }
 JAVA_RESERVED_WORDS = {
@@ -41,6 +52,10 @@ ANDROID_OUTPUT_DIRS = {
     "apk_release": "app/build/outputs/apk/release",
     "aab_release": "app/build/outputs/bundle/release",
 }
+AGP_VERSION = "8.13.0"
+GRADLE_VERSION = "8.13"
+DEFAULT_BUILD_TOOLS = "35.0.0"
+DEFAULT_VERSION_NAME = "1.0.0"
 
 
 def generate_android_project(config: "AndroidConfig") -> tuple[str, str]:
@@ -56,24 +71,32 @@ def generate_android_project(config: "AndroidConfig") -> tuple[str, str]:
     if output_dir.exists() and any(output_dir.iterdir()):
         raise FileExistsError("Output folder already exists and is not empty.")
 
-    start_page = detect_start_page(source_dir, config.start_page)
+    web_root, start_page = resolve_web_root_and_start_page(
+        source_dir,
+        config.start_page,
+        prefer_built_web_root=getattr(config, "prefer_built_web_root", True),
+    )
     min_sdk = int(config.min_sdk)
     target_sdk = int(config.target_sdk)
+    version_code = max(1, int(getattr(config, "version_code", 1) or 1))
+    version_name = sanitize_version_name(getattr(config, "version_name", DEFAULT_VERSION_NAME))
     if min_sdk > target_sdk:
         raise ValueError("Minimum SDK cannot be greater than target SDK.")
 
     java_dir = output_dir / "app" / "src" / "main" / "java" / Path(*package_name.split("."))
     res_dir = output_dir / "app" / "src" / "main" / "res"
     assets_dir = output_dir / "app" / "src" / "main" / "assets" / "app"
+    xml_dir = res_dir / "xml"
 
     java_dir.mkdir(parents=True, exist_ok=True)
     (res_dir / "layout").mkdir(parents=True, exist_ok=True)
     (res_dir / "values").mkdir(parents=True, exist_ok=True)
     (res_dir / "drawable").mkdir(parents=True, exist_ok=True)
     (res_dir / "mipmap-anydpi-v26").mkdir(parents=True, exist_ok=True)
+    xml_dir.mkdir(parents=True, exist_ok=True)
     assets_dir.mkdir(parents=True, exist_ok=True)
 
-    copy_source_folder(source_dir, assets_dir)
+    copy_source_folder(web_root, assets_dir)
 
     if config.mobile_adapt:
         add_mobile_support(assets_dir)
@@ -84,9 +107,13 @@ def generate_android_project(config: "AndroidConfig") -> tuple[str, str]:
     write_text(output_dir / "build.gradle", render_root_build_gradle())
     write_text(output_dir / "gradle.properties", render_gradle_properties())
     write_text(output_dir / ".gitignore", render_gitignore())
-    write_text(output_dir / "README.md", render_readme(app_name, start_page, config.mobile_adapt))
+    write_text(output_dir / "README.md", render_readme(app_name, web_root, start_page, config.mobile_adapt))
+    write_text(output_dir / "keystore.properties.example", render_keystore_properties_example())
 
-    write_text(output_dir / "app" / "build.gradle", render_app_build_gradle(package_name, min_sdk, target_sdk))
+    write_text(
+        output_dir / "app" / "build.gradle",
+        render_app_build_gradle(package_name, min_sdk, target_sdk, version_code, version_name),
+    )
     write_text(output_dir / "app" / "proguard-rules.pro", render_proguard_rules())
     write_text(output_dir / "app" / "src" / "main" / "AndroidManifest.xml", render_manifest())
     write_text(java_dir / "MainActivity.java", render_main_activity(package_name, start_page))
@@ -98,18 +125,25 @@ def generate_android_project(config: "AndroidConfig") -> tuple[str, str]:
     write_text(res_dir / "drawable" / "ic_launcher_foreground.xml", render_launcher_foreground())
     write_text(res_dir / "mipmap-anydpi-v26" / "ic_launcher.xml", render_launcher_icon())
     write_text(res_dir / "mipmap-anydpi-v26" / "ic_launcher_round.xml", render_launcher_icon())
+    write_text(xml_dir / "network_security_config.xml", render_network_security_config())
 
     log_lines = [
         "Android project generated successfully.",
         f"App Name: {app_name}",
         f"Package: {package_name}",
+        f"Web Root: {web_root}",
         f"Start Page: {start_page}",
         f"Min SDK: {min_sdk}",
         f"Target SDK: {target_sdk}",
+        f"Version Code: {version_code}",
+        f"Version Name: {version_name}",
+        f"Android Gradle Plugin: {AGP_VERSION}",
+        f"Recommended Gradle: {GRADLE_VERSION}",
         f"Mobile Adaptation: {'enabled' if config.mobile_adapt else 'disabled'}",
         f"Project Directory: {output_dir}",
         "",
         "Next step: open the generated folder in Android Studio and build the APK/AAB there.",
+        "Tip: copy keystore.properties.example to keystore.properties (or set the COMPASS_ANDROID_* signing variables) before release builds.",
     ]
     return str(output_dir), "\n".join(log_lines)
 
@@ -134,10 +168,12 @@ def build_android_project(config: "AndroidConfig") -> dict:
     if sdk_path:
         write_text(Path(project_dir) / "local.properties", render_local_properties(sdk_path))
 
+    java_hint = resolve_java_runtime_hint()
+
     if build_mode == "project":
         return {
             "project_dir": project_dir,
-            "log_text": log_text,
+            "log_text": log_text + ("\n\n" + java_hint if java_hint else ""),
             "cmd": None,
             "cwd": project_dir,
             "artifact_dir": "",
@@ -152,7 +188,10 @@ def build_android_project(config: "AndroidConfig") -> dict:
         f"Android SDK: {sdk_path}",
         f"Gradle Task: {task}",
         f"Expected Output Folder: {artifact_dir}",
+        "Release signing: configure keystore.properties or COMPASS_ANDROID_* environment variables for signed release artifacts.",
     ]
+    if java_hint:
+        build_lines.append(java_hint)
     return {
         "project_dir": project_dir,
         "log_text": log_text + "\n" + "\n".join(build_lines),
@@ -167,6 +206,11 @@ def sanitize_app_name(name: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9 _-]+", "", name).strip()
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned or "Compass Android App"
+
+
+def sanitize_version_name(version_name: str) -> str:
+    cleaned = (version_name or DEFAULT_VERSION_NAME).strip()
+    return cleaned or DEFAULT_VERSION_NAME
 
 
 def resolve_gradle_command(custom_gradle_path: str) -> str:
@@ -218,6 +262,13 @@ def detect_android_sdk_path(custom_sdk_path: str) -> str:
     return ""
 
 
+def resolve_java_runtime_hint() -> str:
+    java_home = os.environ.get("JAVA_HOME", "").strip()
+    if java_home:
+        return f"JDK hint: AGP {AGP_VERSION} requires JDK 17+. Current JAVA_HOME={java_home}"
+    return f"JDK hint: AGP {AGP_VERSION} requires JDK 17+. If Gradle fails early, verify JAVA_HOME or Android Studio Gradle JDK."
+
+
 def sanitize_module_slug(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return slug or "compass-android-app"
@@ -265,26 +316,80 @@ def ensure_safe_output_dir(source_dir: Path, output_dir: Path) -> None:
     raise ValueError("Output folder cannot be inside the source folder.")
 
 
-def detect_start_page(source_dir: Path, requested_start_page: str) -> str:
+def resolve_web_root_and_start_page(
+    source_dir: Path,
+    requested_start_page: str,
+    prefer_built_web_root: bool = True,
+) -> tuple[Path, str]:
     if requested_start_page and requested_start_page.strip():
-        start_page = resolve_source_relative_path(source_dir, requested_start_page)
-        if start_page.suffix.lower() not in {".html", ".htm"}:
+        requested = resolve_source_relative_path(source_dir, requested_start_page)
+        if requested.suffix.lower() not in {".html", ".htm"}:
             raise ValueError("Start page must be an HTML file.")
-        if not start_page.exists():
+        if not requested.exists():
             raise ValueError("Selected start page does not exist.")
-        return start_page.relative_to(source_dir).as_posix()
+        web_root = infer_web_root_from_entry(source_dir, requested) if prefer_built_web_root else source_dir
+        return web_root, requested.relative_to(web_root).as_posix()
 
-    html_files = sorted(
-        (
-            path for path in source_dir.rglob("*")
-            if path.is_file() and path.suffix.lower() in {".html", ".htm"}
-        ),
-        key=html_sort_key,
-    )
+    preferred_candidate = choose_best_web_root(source_dir) if prefer_built_web_root else None
+    if preferred_candidate is not None:
+        return preferred_candidate[0], preferred_candidate[1].relative_to(preferred_candidate[0]).as_posix()
+
+    html_files = find_html_files(source_dir)
     if not html_files:
         raise ValueError("No HTML entry file found in the selected folder.")
 
-    return html_files[0].relative_to(source_dir).as_posix()
+    return source_dir, html_files[0].relative_to(source_dir).as_posix()
+
+
+def choose_best_web_root(source_dir: Path) -> tuple[Path, Path] | None:
+    root_html_files = find_html_files(source_dir)
+    root_candidate = (source_dir, root_html_files[0]) if root_html_files else None
+
+    named_candidates: list[tuple[Path, Path, str]] = []
+    for name in PREFERRED_WEB_ROOT_NAMES:
+        candidate_dir = source_dir / name
+        if not candidate_dir.is_dir():
+            continue
+        candidate_html_files = find_html_files(candidate_dir)
+        if candidate_html_files:
+            named_candidates.append((candidate_dir, candidate_html_files[0], name))
+
+    if not named_candidates:
+        return root_candidate
+
+    has_project_markers = any((source_dir / marker).exists() for marker in PROJECT_MARKER_FILES)
+    if has_project_markers:
+        candidate_dir, entry_file, _ = sorted(named_candidates, key=named_web_root_sort_key)[0]
+        return candidate_dir, entry_file
+
+    if root_candidate:
+        return root_candidate
+
+    candidate_dir, entry_file, _ = sorted(named_candidates, key=named_web_root_sort_key)[0]
+    return candidate_dir, entry_file
+
+
+def named_web_root_sort_key(item: tuple[Path, Path, str]) -> tuple[int, int, int, str]:
+    candidate_dir, entry_file, name = item
+    priority = PREFERRED_WEB_ROOT_NAMES.index(name)
+    rel_depth = len(entry_file.relative_to(candidate_dir).parts)
+    return priority, rel_depth, len(candidate_dir.parts), candidate_dir.as_posix().lower()
+
+
+def infer_web_root_from_entry(source_dir: Path, entry_file: Path) -> Path:
+    relatives = entry_file.relative_to(source_dir).parts
+    for preferred_name in PREFERRED_WEB_ROOT_NAMES:
+        if preferred_name in relatives:
+            index = relatives.index(preferred_name)
+            candidate_root = source_dir.joinpath(*relatives[: index + 1])
+            if candidate_root.is_dir():
+                return candidate_root
+    return source_dir
+
+
+def detect_start_page(source_dir: Path, requested_start_page: str) -> str:
+    _, start_page = resolve_web_root_and_start_page(source_dir, requested_start_page, prefer_built_web_root=True)
+    return start_page
 
 
 def resolve_source_relative_path(source_dir: Path, raw_path: str) -> Path:
@@ -297,6 +402,24 @@ def resolve_source_relative_path(source_dir: Path, raw_path: str) -> Path:
         raise ValueError("Start page must be inside the selected source folder.") from exc
 
     return resolved
+
+
+def find_html_files(search_root: Path) -> list[Path]:
+    return sorted(
+        (
+            path for path in search_root.rglob("*")
+            if path.is_file() and path.suffix.lower() in {".html", ".htm"} and not is_ignored_path(search_root, path)
+        ),
+        key=html_sort_key,
+    )
+
+
+def is_ignored_path(root: Path, candidate: Path) -> bool:
+    try:
+        relative_parts = candidate.relative_to(root).parts
+    except ValueError:
+        return False
+    return any(part in IGNORED_NAMES for part in relative_parts)
 
 
 def html_sort_key(path: Path) -> tuple[int, int, str]:
@@ -333,7 +456,7 @@ def inject_mobile_tags(raw_html: str, asset_prefix: str) -> str:
     css_tag = f'<link rel="stylesheet" href="{asset_prefix}compass-mobile-adapter.css">'
     js_tag = f'<script src="{asset_prefix}compass-mobile-adapter.js"></script>'
 
-    if "name=\"viewport\"" not in lowered:
+    if 'name="viewport"' not in lowered:
         updated = inject_into_head(updated, viewport_tag)
         lowered = updated.lower()
 
@@ -369,17 +492,13 @@ def inject_before_body_close(raw_html: str, snippet: str) -> str:
     match = re.search(r"</body\s*>", raw_html, flags=re.IGNORECASE)
     if match:
         return f"{raw_html[:match.start()]}    {snippet}\n{raw_html[match.start():]}"
-
-    html_close = re.search(r"</html\s*>", raw_html, flags=re.IGNORECASE)
-    if html_close:
-        return f"{raw_html[:html_close.start()]}    {snippet}\n{raw_html[html_close.start():]}"
-
-    return f"{raw_html}\n{snippet}\n"
+    return raw_html + f"\n{snippet}\n"
 
 
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content.lstrip("\r\n").rstrip() + "\n", encoding="utf-8")
+    normalized = content.strip() + "\n"
+    path.write_text(normalized, encoding="utf-8")
 
 
 def render_local_properties(sdk_path: str) -> str:
@@ -390,11 +509,17 @@ def render_local_properties(sdk_path: str) -> str:
 def render_settings_gradle(module_slug: str) -> str:
     return textwrap.dedent(
         f"""
+        def compassUseAliyunMirrors =
+            providers.gradleProperty("COMPASS_USE_ALIYUN_MIRRORS").orNull?.toBoolean() ?: \
+            System.getenv("COMPASS_USE_ALIYUN_MIRRORS")?.toBoolean() ?: false
+
         pluginManagement {{
             repositories {{
-                maven {{ url 'https://maven.aliyun.com/repository/gradle-plugin' }}
-                maven {{ url 'https://maven.aliyun.com/repository/google' }}
-                maven {{ url 'https://maven.aliyun.com/repository/public' }}
+                if (compassUseAliyunMirrors) {{
+                    maven {{ url 'https://maven.aliyun.com/repository/gradle-plugin' }}
+                    maven {{ url 'https://maven.aliyun.com/repository/google' }}
+                    maven {{ url 'https://maven.aliyun.com/repository/public' }}
+                }}
                 google()
                 mavenCentral()
                 gradlePluginPortal()
@@ -404,8 +529,10 @@ def render_settings_gradle(module_slug: str) -> str:
         dependencyResolutionManagement {{
             repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
             repositories {{
-                maven {{ url 'https://maven.aliyun.com/repository/google' }}
-                maven {{ url 'https://maven.aliyun.com/repository/public' }}
+                if (compassUseAliyunMirrors) {{
+                    maven {{ url 'https://maven.aliyun.com/repository/google' }}
+                    maven {{ url 'https://maven.aliyun.com/repository/public' }}
+                }}
                 google()
                 mavenCentral()
             }}
@@ -419,10 +546,10 @@ def render_settings_gradle(module_slug: str) -> str:
 
 def render_root_build_gradle() -> str:
     return textwrap.dedent(
-        """
-        plugins {
-            id 'com.android.application' version '8.5.2' apply false
-        }
+        f"""
+        plugins {{
+            id 'com.android.application' version '{AGP_VERSION}' apply false
+        }}
         """
     )
 
@@ -431,6 +558,8 @@ def render_gradle_properties() -> str:
     return textwrap.dedent(
         """
         org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+        org.gradle.parallel=true
+        org.gradle.caching=true
         android.useAndroidX=true
         android.nonTransitiveRClass=true
         """
@@ -444,6 +573,7 @@ def render_gitignore() -> str:
         .idea/
         *.iml
         local.properties
+        keystore.properties
         build/
         app/build/
         captures/
@@ -451,8 +581,29 @@ def render_gitignore() -> str:
     )
 
 
-def render_readme(app_name: str, start_page: str, mobile_adapt: bool) -> str:
-    adaptation_line = "- Injects `compass-mobile-adapter.css` and `compass-mobile-adapter.js` into HTML files" if mobile_adapt else "- Keeps copied assets untouched; mobile WebView behavior still stays enabled in native code"
+def render_keystore_properties_example() -> str:
+    return textwrap.dedent(
+        """
+        # Copy this file to keystore.properties and replace the placeholder values.
+        # You can also supply the same values with environment variables:
+        #   COMPASS_ANDROID_KEYSTORE_FILE
+        #   COMPASS_ANDROID_KEYSTORE_PASSWORD
+        #   COMPASS_ANDROID_KEY_ALIAS
+        #   COMPASS_ANDROID_KEY_PASSWORD
+        COMPASS_ANDROID_KEYSTORE_FILE=/absolute/path/to/release.keystore
+        COMPASS_ANDROID_KEYSTORE_PASSWORD=change-me
+        COMPASS_ANDROID_KEY_ALIAS=release
+        COMPASS_ANDROID_KEY_PASSWORD=change-me
+        """
+    )
+
+
+def render_readme(app_name: str, web_root: Path, start_page: str, mobile_adapt: bool) -> str:
+    adaptation_line = (
+        "- Injects `compass-mobile-adapter.css` and `compass-mobile-adapter.js` into HTML files"
+        if mobile_adapt
+        else "- Keeps copied assets untouched; mobile WebView behavior still stays enabled in native code"
+    )
     return textwrap.dedent(
         f"""
         # {app_name}
@@ -461,44 +612,113 @@ def render_readme(app_name: str, start_page: str, mobile_adapt: bool) -> str:
 
         ## Included behavior
         - Loads the packaged site from `app/src/main/assets/app/{start_page}`
+        - Auto-detected web root: `{web_root}`
+        - Uses Android Gradle Plugin `{AGP_VERSION}` and recommends Gradle `{GRADLE_VERSION}`
         - Enables mobile-friendly WebView settings, pull-to-refresh, back navigation, and responsive viewport helpers
         {adaptation_line}
 
         ## Build
         1. Open this folder in Android Studio.
-        2. Let Gradle sync.
-        3. Use `Build > Build Bundle(s) / APK(s)` to produce an installable package.
+        2. Ensure the project uses JDK 17 or newer for Gradle.
+        3. Let Gradle sync.
+        4. Use `Build > Build Bundle(s) / APK(s)` to produce an installable package.
+
+        ## Release signing
+        - For signed release builds, copy `keystore.properties.example` to `keystore.properties` and fill in your keystore values.
+        - Alternatively, set the `COMPASS_ANDROID_KEYSTORE_FILE`, `COMPASS_ANDROID_KEYSTORE_PASSWORD`, `COMPASS_ANDROID_KEY_ALIAS`, and `COMPASS_ANDROID_KEY_PASSWORD` environment variables.
+        - If signing isn't configured, release APK/AAB outputs remain unsigned.
 
         ## Notes
         - Source web assets are copied to `app/src/main/assets/app`.
-        - If your site depends on remote HTTP resources, cleartext traffic is enabled by default.
+        - When you choose a frontend project root, Compass prefers deployable web roots such as `dist/`, `build/`, `public/`, and `www/` when they contain the HTML entry.
+        - If your site depends on remote HTTP resources, cleartext traffic is enabled for compatibility. Tighten it before production if you only need HTTPS.
         """
     )
 
 
-def render_app_build_gradle(package_name: str, min_sdk: int, target_sdk: int) -> str:
+def render_app_build_gradle(
+    package_name: str,
+    min_sdk: int,
+    target_sdk: int,
+    version_code: int,
+    version_name: str,
+) -> str:
+    safe_version_name = escape_gradle_string(version_name)
     return textwrap.dedent(
         f"""
+        import java.util.Properties
+
         plugins {{
             id 'com.android.application'
         }}
 
+        def compassSigningProps = new Properties()
+        def compassSigningFile = rootProject.file('keystore.properties')
+        if (compassSigningFile.exists()) {{
+            compassSigningFile.withInputStream {{ compassSigningProps.load(it) }}
+        }}
+
+        def readCompassValue = {{ String key ->
+            def gradleValue = providers.gradleProperty(key).orNull
+            if (gradleValue != null && !gradleValue.trim().isEmpty()) {{
+                return gradleValue.trim()
+            }}
+            def envValue = System.getenv(key)
+            if (envValue != null && !envValue.trim().isEmpty()) {{
+                return envValue.trim()
+            }}
+            def fileValue = compassSigningProps.getProperty(key)
+            if (fileValue != null && !fileValue.trim().isEmpty()) {{
+                return fileValue.trim()
+            }}
+            return null
+        }}
+
+        def releaseStoreFile = readCompassValue('COMPASS_ANDROID_KEYSTORE_FILE')
+        def releaseStorePassword = readCompassValue('COMPASS_ANDROID_KEYSTORE_PASSWORD')
+        def releaseKeyAlias = readCompassValue('COMPASS_ANDROID_KEY_ALIAS')
+        def releaseKeyPassword = readCompassValue('COMPASS_ANDROID_KEY_PASSWORD')
+        def releaseSigningReady = [releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].every {{ it }}
+
         android {{
             namespace '{package_name}'
             compileSdk {target_sdk}
+            buildToolsVersion '{DEFAULT_BUILD_TOOLS}'
 
             defaultConfig {{
                 applicationId '{package_name}'
                 minSdk {min_sdk}
                 targetSdk {target_sdk}
-                versionCode 1
-                versionName '1.0'
+                versionCode {version_code}
+                versionName '{safe_version_name}'
+            }}
+
+            signingConfigs {{
+                if (releaseSigningReady) {{
+                    release {{
+                        storeFile file(releaseStoreFile)
+                        storePassword releaseStorePassword
+                        keyAlias releaseKeyAlias
+                        keyPassword releaseKeyPassword
+                    }}
+                }}
             }}
 
             buildTypes {{
+                debug {{
+                    applicationIdSuffix '.debug'
+                    versionNameSuffix '-debug'
+                    signingConfig signingConfigs.debug
+                }}
                 release {{
                     minifyEnabled false
+                    shrinkResources false
                     proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+                    if (releaseSigningReady) {{
+                        signingConfig signingConfigs.release
+                    }} else {{
+                        logger.lifecycle('Compass: release signing is not configured; release outputs will be unsigned.')
+                    }}
                 }}
             }}
 
@@ -506,21 +726,26 @@ def render_app_build_gradle(package_name: str, min_sdk: int, target_sdk: int) ->
                 sourceCompatibility JavaVersion.VERSION_17
                 targetCompatibility JavaVersion.VERSION_17
             }}
-        }}
 
-        configurations.configureEach {{
-            exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
-            exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
+            packaging {{
+                resources {{
+                    excludes += ['/META-INF/{{AL2.0,LGPL2.1}}']
+                }}
+            }}
         }}
 
         dependencies {{
-            implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+            implementation 'androidx.activity:activity:1.13.0'
             implementation 'androidx.appcompat:appcompat:1.7.0'
-            implementation 'androidx.webkit:webkit:1.11.0'
+            implementation 'androidx.webkit:webkit:1.15.0'
             implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
         }}
         """
     )
+
+
+def escape_gradle_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
 def render_proguard_rules() -> str:
@@ -537,9 +762,11 @@ def render_manifest() -> str:
 
             <application
                 android:allowBackup="true"
+                android:fullBackupContent="true"
                 android:hardwareAccelerated="true"
                 android:icon="@mipmap/ic_launcher"
                 android:label="@string/app_name"
+                android:networkSecurityConfig="@xml/network_security_config"
                 android:resizeableActivity="true"
                 android:roundIcon="@mipmap/ic_launcher_round"
                 android:supportsRtl="true"
@@ -560,6 +787,17 @@ def render_manifest() -> str:
             </application>
 
         </manifest>
+        """
+    )
+
+
+def render_network_security_config() -> str:
+    return textwrap.dedent(
+        """
+        <?xml version="1.0" encoding="utf-8"?>
+        <network-security-config>
+            <base-config cleartextTrafficPermitted="true" />
+        </network-security-config>
         """
     )
 
